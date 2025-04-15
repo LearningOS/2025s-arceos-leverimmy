@@ -53,7 +53,7 @@ impl<const PAGE_SIZE: usize> BaseAllocator for EarlyAllocator<PAGE_SIZE> {
         self.count = 0;
     }
 
-    fn add_memory(&mut self, start: usize, size: usize) -> AllocResult {
+    fn add_memory(&mut self, _start: usize, _size: usize) -> AllocResult {
         unimplemented!()
     }
 }
@@ -75,16 +75,15 @@ impl<const PAGE_SIZE: usize> ByteAllocator for EarlyAllocator<PAGE_SIZE> {
     }
 
     fn dealloc(&mut self, pos: NonNull<u8>, layout: Layout) {
-        // Deallocate memory at the given position
-        let pos = pos.as_ptr() as usize;
-        if pos >= self.start && pos < self.end {
+        let size = layout.size();
+
+        if pos.as_ptr() as usize + size == self.b_pos {
+            self.b_pos -= size;
             self.count -= 1;
-            if self.count == 0 {
-                // Free the bytes-used area
-                self.b_pos = pos;
-            }
-        } else {
-            panic!("Invalid bytes deallocation!");
+        }
+
+        if self.count == 0 {
+            self.b_pos = self.start;
         }
     }
 
@@ -118,13 +117,8 @@ impl<const PAGE_SIZE: usize> PageAllocator for EarlyAllocator<PAGE_SIZE> {
         Ok(aligned_pos)
     }
 
-    fn dealloc_pages(&mut self, pos: usize, num_pages: usize) {
-        // Deallocate pages at the given position
-        if pos >= self.start && pos < self.end {
-            // Do nothing, as pages are not freed in this allocator
-        } else {
-            panic!("Invalid pages deallocation!");
-        }
+    fn dealloc_pages(&mut self, _pos: usize, _num_pages: usize) {
+        unimplemented!()
     }
 
     fn total_pages(&self) -> usize {
