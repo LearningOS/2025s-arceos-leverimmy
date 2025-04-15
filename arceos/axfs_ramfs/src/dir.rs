@@ -165,6 +165,55 @@ impl VfsNodeOps for DirNode {
         }
     }
 
+    fn rename(&self, src_path: &str, dst_path: &str) -> VfsResult {
+        let dst_path = dst_path.trim_start_matches("/tmp");
+        let (src_name, src_rest) = split_path(src_path);
+        if let Some(src_rest) = src_rest {
+            match src_name {
+                "" | "." => self.rename(src_rest, dst_path),
+                ".." => self.parent().ok_or(VfsError::NotFound)?.rename(src_rest, dst_path),
+                _ => {
+                    let subdir = self
+                        .children
+                        .read()
+                        .get(src_name)
+                        .ok_or(VfsError::NotFound)?
+                        .clone();
+                    subdir.rename(src_rest, dst_path)
+                }
+            }
+        } else if src_name.is_empty() || src_name == "." || src_name == ".." {
+            return Err(VfsError::InvalidInput);
+        } else {
+            let (dst_name, dst_rest) = split_path(dst_path);
+            if let Some(dst_rest) = dst_rest {
+                match dst_name {
+                    "" | "." => self.rename(src_name, dst_rest),
+                    ".." => self.parent().ok_or(VfsError::NotFound)?.rename(src_name, dst_rest),
+                    _ => {
+                        let subdir = self
+                            .children
+                            .read()
+                            .get(dst_name)
+                            .ok_or(VfsError::NotFound)?
+                            .clone();
+                        subdir.rename(src_name, dst_rest)
+                    }
+                }
+            } else if dst_name.is_empty() || dst_name == "." || dst_name == ".." {
+                return Err(VfsError::InvalidInput);
+            } else {
+                let mut children = self.children.write();
+                let node = children
+                .remove(src_name)
+                .ok_or(VfsError::NotFound)?
+                .clone();
+                children.insert(dst_name.into(), node);
+                Ok(())
+            }
+        }
+    }
+
     axfs_vfs::impl_vfs_dir_default! {}
 }
 
