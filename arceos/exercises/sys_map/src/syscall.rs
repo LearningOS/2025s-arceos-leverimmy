@@ -7,7 +7,9 @@ use axerrno::LinuxError;
 use axtask::current;
 use axtask::TaskExtRef;
 use axhal::paging::MappingFlags;
-use arceos_posix_api as api;
+use arceos_posix_api::{self as api, get_file_like};
+use memory_addr::{MemoryAddr, VirtAddr, VirtAddrRange};
+use alloc::vec;
 
 const SYS_IOCTL: usize = 29;
 const SYS_OPENAT: usize = 56;
@@ -131,7 +133,7 @@ fn handle_syscall(tf: &TrapFrame, syscall_num: usize) -> isize {
     ret
 }
 
-#[allow(unused_variables)]
+// #[allow(unused_variables)]
 fn sys_mmap(
     addr: *mut usize,
     length: usize,
@@ -140,7 +142,26 @@ fn sys_mmap(
     fd: i32,
     _offset: isize,
 ) -> isize {
-    unimplemented!("no sys_mmap!");
+    debug!("sys_mmap: addr: {:#x}, length: {}, prot: {}, flags: {}, fd: {}, _offset: {}", addr as usize, length, prot, flags, fd, _offset);
+    let binding = current();
+    let mut uspace = binding.task_ext().aspace.lock();
+    let length = length.align_up_4k();
+    if let Some(vaddr) = uspace.find_free_area(
+        VirtAddr::from(addr as usize),
+        length,
+        VirtAddrRange::from_start_size(uspace.base(), uspace.size())) {
+            if let Ok(_) = uspace.map_alloc(vaddr, length, MappingFlags::from(MmapProt::from_bits(prot).unwrap()), true) {
+                if let Ok(file) = get_file_like(fd) {
+                    let mut buf = vec![0u8; length];
+                    if let Ok(_) = file.read(&mut buf) {
+                        if let Ok(_) = uspace.write(vaddr, &buf) {
+                            return vaddr.as_usize() as isize;
+                        }
+                    }
+                }
+            }
+    }
+    -1
 }
 
 fn sys_openat(dfd: c_int, fname: *const c_char, flags: c_int, mode: api::ctypes::mode_t) -> isize {
