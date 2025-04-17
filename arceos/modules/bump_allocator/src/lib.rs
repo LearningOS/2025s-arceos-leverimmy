@@ -60,28 +60,19 @@ impl<const PAGE_SIZE: usize> BaseAllocator for EarlyAllocator<PAGE_SIZE> {
 
 impl<const PAGE_SIZE: usize> ByteAllocator for EarlyAllocator<PAGE_SIZE> {
     fn alloc(&mut self, layout: Layout) -> AllocResult<NonNull<u8>> {
-        // Check if there is enough space for the requested layout
-        let size = layout.size();
-        if self.b_pos + size > self.p_pos {
+        let start = (self.b_pos + layout.align() - 1) & !(layout.align() - 1);
+        let next = start + layout.size();
+        if next > self.p_pos {
             return Err(AllocError::NoMemory);
+        } else {
+            self.b_pos = next;
+            self.count += 1;
+            NonNull::new(start as *mut u8).ok_or(AllocError::NoMemory)
         }
-
-        // Allocate memory at the current position
-        let pos = NonNull::new(self.b_pos as *mut u8).ok_or(AllocError::NoMemory)?;
-        self.b_pos += size;
-        self.count += 1;
-
-        Ok(pos)
     }
 
-    fn dealloc(&mut self, pos: NonNull<u8>, layout: Layout) {
-        let size = layout.size();
-
-        if pos.as_ptr() as usize + size == self.b_pos {
-            self.b_pos -= size;
-            self.count -= 1;
-        }
-
+    fn dealloc(&mut self, _ptr: NonNull<u8>, _layout: Layout) {
+        self.count -= 1;
         if self.count == 0 {
             self.b_pos = self.start;
         }
@@ -96,7 +87,7 @@ impl<const PAGE_SIZE: usize> ByteAllocator for EarlyAllocator<PAGE_SIZE> {
     }
 
     fn available_bytes(&self) -> usize {
-        self.end - self.b_pos
+        self.p_pos - self.b_pos
     }
 }
 
@@ -104,17 +95,13 @@ impl<const PAGE_SIZE: usize> PageAllocator for EarlyAllocator<PAGE_SIZE> {
     const PAGE_SIZE: usize = PAGE_SIZE;
 
     fn alloc_pages(&mut self, num_pages: usize, align_pow2: usize) -> AllocResult<usize> {
-        // Check if the requested number of pages can be allocated
-        if self.p_pos - num_pages * PAGE_SIZE < self.start {
+        let next = (self.p_pos - PAGE_SIZE * num_pages) & !(PAGE_SIZE * align_pow2 - 1);
+        if next <= self.b_pos {
             return Err(AllocError::NoMemory);
+        } else {
+            self.p_pos = next;
+            Ok(next)
         }
-
-        // Align the position to the requested alignment
-        let aligned_pos = (self.p_pos - num_pages * PAGE_SIZE) & !(align_pow2 - 1);
-
-        // Update the position and return the allocated address
-        self.p_pos = aligned_pos;
-        Ok(aligned_pos)
     }
 
     fn dealloc_pages(&mut self, _pos: usize, _num_pages: usize) {
@@ -126,10 +113,10 @@ impl<const PAGE_SIZE: usize> PageAllocator for EarlyAllocator<PAGE_SIZE> {
     }
 
     fn used_pages(&self) -> usize {
-        (self.p_pos - self.start) / PAGE_SIZE
+        (self.end - self.p_pos) / PAGE_SIZE
     }
 
     fn available_pages(&self) -> usize {
-        (self.end - self.p_pos) / PAGE_SIZE
+        (self.p_pos - self.b_pos) / PAGE_SIZE
     }
 }
